@@ -163,8 +163,8 @@ k2.metric("IGP promedio", f"{view[igp_col].mean():.1f}" if igp_col else "N/D")
 k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
 
-tab_overview, tab_comparator, tab_ranking, tab_awards, tab_performance, tab_profile, tab_evolution, tab_data = st.tabs(
-    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "🎖️ Reconocimientos", "🚦 Rendimiento", "👤 Perfil", "📈 Evolución", "📋 Datos"]
+tab_overview, tab_comparator, tab_ranking, tab_awards, tab_performance, tab_profile, tab_evolution, tab_history, tab_data = st.tabs(
+    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "🎖️ Reconocimientos", "🚦 Rendimiento", "👤 Perfil", "📈 Evolución", "🗂️ Histórico", "📋 Datos"]
 )
 
 with tab_overview:
@@ -995,6 +995,178 @@ with tab_evolution:
         "en el archivo Excel. No permiten atribuir cambios a carreras concretas ni calcular "
         "la evolución histórica de puntos, victorias o podios por periodo. Para eso se necesitaría "
         "guardar una copia fechada del Excel en cada actualización o disponer de registros por carrera."
+    )
+
+
+with tab_history:
+    st.subheader("Histórico de rendimiento")
+    st.caption(
+        "Consulta la evolución de los indicadores guardados en cada captura del Excel. "
+        "Los registros comienzan desde la primera captura realizada con esta funcionalidad."
+    )
+
+    history_file = Path(__file__).with_name("historico_indicadores.csv")
+    if history_file.exists():
+        try:
+            history = pd.read_csv(history_file)
+            required_history_cols = {"snapshot_id", "Fecha captura", "Integrante", "Indicador", "Valor"}
+            if not required_history_cols.issubset(history.columns):
+                st.error("El archivo histórico no tiene la estructura esperada. No se mostrarán datos incompletos.")
+                history = pd.DataFrame()
+            else:
+                history["Valor"] = pd.to_numeric(history["Valor"], errors="coerce")
+                history["Fecha captura"] = history["Fecha captura"].astype(str)
+                history = history.dropna(subset=["Valor"])
+        except Exception as exc:
+            st.error(f"No fue posible leer el histórico: {exc}")
+            history = pd.DataFrame()
+    else:
+        history = pd.DataFrame()
+
+    if history.empty:
+        st.info(
+            "Todavía no hay capturas históricas. Después de actualizar el Excel en GitHub, "
+            "ejecuta el flujo manual **Capturar histórico** desde la pestaña Actions del repositorio."
+        )
+        st.markdown(
+            "[Abrir el repositorio en GitHub](https://github.com/SemiSonic-lab/caramelo-tm-performance-dashboard)"
+        )
+    else:
+        history_dates = sorted(history["Fecha captura"].dropna().unique().tolist())
+        history_players = sorted(history["Integrante"].dropna().unique().tolist())
+        history_metrics = sorted(history["Indicador"].dropna().unique().tolist())
+
+        hist_metric = st.selectbox(
+            "Indicador que deseas analizar",
+            options=history_metrics,
+            key="phase5_history_metric",
+        )
+        hist_players = st.multiselect(
+            "Integrantes",
+            options=history_players,
+            default=history_players,
+            key="phase5_history_players",
+        )
+        metric_history = history[
+            (history["Indicador"] == hist_metric)
+            & (history["Integrante"].isin(hist_players))
+        ].copy()
+        metric_history["Valor"] = metric_history["Valor"].round(1)
+
+        if not metric_history.empty:
+            fig = px.line(
+                metric_history,
+                x="Fecha captura",
+                y="Valor",
+                color="Integrante",
+                markers=True,
+                hover_data={"Fecha captura": True, "Valor": ":.1f"},
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                height=440,
+                xaxis_title="Fecha de captura",
+                yaxis_title=hist_metric,
+                legend_title="Integrante",
+                margin=dict(l=10, r=15, t=25, b=10),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay registros para la combinación seleccionada.")
+
+        st.markdown("#### Evolución colectiva")
+        collective = history[history["Indicador"] == hist_metric].copy()
+        if hist_metric == "Promedio de puntos por carrera":
+            collective = collective.groupby("Fecha captura", as_index=False)["Valor"].mean()
+            collective_label = "Promedio del equipo"
+        else:
+            collective = collective.groupby("Fecha captura", as_index=False)["Valor"].sum()
+            collective_label = "Total del equipo"
+        collective["Valor"] = collective["Valor"].round(1)
+        if not collective.empty:
+            fig = px.line(
+                collective,
+                x="Fecha captura",
+                y="Valor",
+                markers=True,
+                text="Valor",
+            )
+            fig.update_traces(texttemplate="%{text:.1f}", textposition="top center")
+            fig.update_layout(
+                template="plotly_dark",
+                height=340,
+                xaxis_title="Fecha de captura",
+                yaxis_title=f"{collective_label} · {hist_metric}",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### Comparación entre dos capturas")
+        date_left, date_right = st.columns(2)
+        first_date = date_left.selectbox(
+            "Captura inicial",
+            options=history_dates,
+            index=0,
+            key="phase5_first_snapshot",
+        )
+        last_date = date_right.selectbox(
+            "Captura final",
+            options=history_dates,
+            index=len(history_dates) - 1,
+            key="phase5_last_snapshot",
+        )
+        comparison_history = history[history["Indicador"] == hist_metric].copy()
+        comparison_history = comparison_history[
+            comparison_history["Fecha captura"].isin([first_date, last_date])
+        ]
+        comparison_pivot = comparison_history.pivot_table(
+            index="Integrante",
+            columns="Fecha captura",
+            values="Valor",
+            aggfunc="last",
+        ).reset_index()
+        if first_date in comparison_pivot.columns and last_date in comparison_pivot.columns:
+            comparison_pivot["Variación"] = (
+                comparison_pivot[last_date] - comparison_pivot[first_date]
+            )
+            comparison_pivot = comparison_pivot.rename(
+                columns={first_date: "Valor inicial", last_date: "Valor final"}
+            )
+            st.dataframe(
+                comparison_pivot.round(1),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "⬇️ Descargar comparación histórica CSV",
+                comparison_pivot.round(1).to_csv(index=False).encode("utf-8-sig"),
+                file_name="caramelo_tm_comparacion_historica.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No existen datos comparables para ambas capturas.")
+
+        st.markdown("#### Capturas disponibles")
+        snapshots = (
+            history.groupby(["snapshot_id", "Fecha captura"], as_index=False)
+            .agg(
+                Integrantes=("Integrante", "nunique"),
+                Registros=("Indicador", "count"),
+            )
+            .sort_values("Fecha captura")
+        )
+        st.dataframe(snapshots[["Fecha captura", "Integrantes", "Registros"]], use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Descargar histórico completo CSV",
+            history.drop(columns=["snapshot_id"]).round({"Valor": 1}).to_csv(index=False).encode("utf-8-sig"),
+            file_name="caramelo_tm_historico.csv",
+            mime="text/csv",
+        )
+
+    st.info(
+        "Metodología: cada captura conserva los indicadores vigentes al momento de ejecutarla. "
+        "La evolución representa cambios entre capturas, no resultados carrera a carrera. "
+        "El promedio del equipo se calcula como media; los demás indicadores se agregan como total."
     )
 
 with tab_data:
