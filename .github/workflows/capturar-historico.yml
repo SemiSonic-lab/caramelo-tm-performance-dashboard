@@ -30,7 +30,7 @@ jobs:
 
       - name: Guardar cambios en el repositorio
         run: |
-          if git diff --quiet -- historico_indicadores.csv; then
+          if [ -z "$(git status --porcelain -- historico_indicadores.csv)" ]; then
             echo "No hay una nueva captura para guardar."
           else
             git config user.name "github-actions[bot]"
