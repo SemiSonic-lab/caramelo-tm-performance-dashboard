@@ -805,7 +805,7 @@ with tab_evolution:
     position_rows = []
     for _, player_row in view.iterrows():
         for col in position_cols:
-            match = re.search(r"\\((\\d{4}-\\d{2}-\\d{2})\\)", col)
+            match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
             value = pd.to_numeric(pd.Series([player_row[col]]), errors="coerce").iloc[0]
             if match and pd.notna(value):
                 position_rows.append({
@@ -817,7 +817,7 @@ with tab_evolution:
     reputation_rows = []
     for _, player_row in view.iterrows():
         for col in reputation_cols:
-            match = re.search(r"\\((\\d{4}-\\d{2}-\\d{2})\\)", col)
+            match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
             value = pd.to_numeric(pd.Series([player_row[col]]), errors="coerce").iloc[0]
             if match and pd.notna(value):
                 reputation_rows.append({
