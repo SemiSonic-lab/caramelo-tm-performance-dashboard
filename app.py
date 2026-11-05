@@ -795,50 +795,207 @@ with tab_profile:
         st.info("Este integrante no tiene datos históricos suficientes para mostrar una evolución.")
 
 with tab_evolution:
-    st.subheader("Evolución de posición en el club")
-    if position_cols:
-        rows = []
-        for _, row in view.iterrows():
-            for col in position_cols:
-                match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
-                val = pd.to_numeric(pd.Series([row[col]]), errors="coerce").iloc[0]
-                if match and pd.notna(val):
-                    rows.append({"Integrante": row["Integrante"], "Fecha": match.group(1), "Posición": val})
-        if rows:
-            hist = pd.DataFrame(rows)
-            focus = st.multiselect("Integrantes para comparar", sorted(view["Integrante"].unique()),
-                                   default=[selected_player], key="position_focus")
-            hist = hist[hist["Integrante"].isin(focus)]
-            fig = px.line(hist, x="Fecha", y="Posición", color="Integrante", markers=True)
-            fig.update_yaxes(autorange="reversed", title="Puesto (1 = mejor posición)")
-            fig.update_layout(template="plotly_dark", height=430, xaxis_title="Fecha")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay posiciones históricas numéricas disponibles.")
-    else:
-        st.info("No se identificaron columnas históricas de posición.")
+    st.subheader("Tendencias e historial del equipo")
+    st.caption(
+        "Compara los cambios observados entre las fechas históricas disponibles. "
+        "La evolución refleja snapshots registrados en el Excel, no resultados carrera a carrera."
+    )
 
-    st.subheader("Evolución de reputación")
-    if reputation_cols:
-        rows = []
-        for _, row in view.iterrows():
-            for col in reputation_cols:
-                match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
-                val = pd.to_numeric(pd.Series([row[col]]), errors="coerce").iloc[0]
-                if match and pd.notna(val):
-                    rows.append({"Integrante": row["Integrante"], "Fecha": match.group(1), "Reputación": val})
-        if rows:
-            hist = pd.DataFrame(rows)
-            focus = st.multiselect("Integrantes para comparar", sorted(view["Integrante"].unique()),
-                                   default=[selected_player], key="reputation_focus")
-            hist = hist[hist["Integrante"].isin(focus)]
-            fig = px.line(hist, x="Fecha", y="Reputación", color="Integrante", markers=True)
-            fig.update_layout(template="plotly_dark", height=430, xaxis_title="Fecha")
+    # Construir series históricas a partir de las columnas fechadas del Excel.
+    position_rows = []
+    for _, player_row in view.iterrows():
+        for col in position_cols:
+            match = re.search(r"\\((\\d{4}-\\d{2}-\\d{2})\\)", col)
+            value = pd.to_numeric(pd.Series([player_row[col]]), errors="coerce").iloc[0]
+            if match and pd.notna(value):
+                position_rows.append({
+                    "Integrante": player_row["Integrante"],
+                    "Fecha": match.group(1),
+                    "Posición": float(value),
+                })
+
+    reputation_rows = []
+    for _, player_row in view.iterrows():
+        for col in reputation_cols:
+            match = re.search(r"\\((\\d{4}-\\d{2}-\\d{2})\\)", col)
+            value = pd.to_numeric(pd.Series([player_row[col]]), errors="coerce").iloc[0]
+            if match and pd.notna(value):
+                reputation_rows.append({
+                    "Integrante": player_row["Integrante"],
+                    "Fecha": match.group(1),
+                    "Reputación": float(value),
+                })
+
+    position_history = pd.DataFrame(position_rows)
+    reputation_history = pd.DataFrame(reputation_rows)
+
+    if not position_history.empty:
+        position_history = position_history.sort_values(["Fecha", "Integrante"])
+        position_dates = sorted(position_history["Fecha"].unique().tolist())
+
+        # Comparación del primer y último snapshot disponible por integrante.
+        position_summary = (
+            position_history.sort_values("Fecha")
+            .groupby("Integrante", as_index=False)
+            .agg(
+                **{
+                    "Primera posición": ("Posición", "first"),
+                    "Última posición": ("Posición", "last"),
+                    "Snapshots": ("Fecha", "nunique"),
+                }
+            )
+        )
+        position_summary["Cambio de posición"] = (
+            position_summary["Primera posición"] - position_summary["Última posición"]
+        )
+        position_summary["Tendencia"] = position_summary["Cambio de posición"].apply(
+            lambda value: "Mejora" if value > 0 else ("Retroceso" if value < 0 else "Sin cambio")
+        )
+
+        improved = int((position_summary["Cambio de posición"] > 0).sum())
+        declined = int((position_summary["Cambio de posición"] < 0).sum())
+        unchanged = int((position_summary["Cambio de posición"] == 0).sum())
+
+        st.markdown("#### Balance de posiciones")
+        trend_kpis = st.columns(4)
+        trend_kpis[0].metric("Snapshots disponibles", f"{len(position_dates):,.0f}")
+        trend_kpis[1].metric("Integrantes que mejoran", f"{improved:,.0f}")
+        trend_kpis[2].metric("Integrantes que retroceden", f"{declined:,.0f}")
+        trend_kpis[3].metric("Sin cambio neto", f"{unchanged:,.0f}")
+
+        st.caption(
+            "Un cambio positivo significa que el número de puesto disminuyó y, por tanto, "
+            "el integrante mejoró su posición. La comparación usa el primer y último dato "
+            "disponible de cada integrante; puede haber fechas faltantes."
+        )
+
+        st.markdown("#### Evolución comparativa de posiciones")
+        default_focus = [selected_player] if selected_player in view["Integrante"].tolist() else []
+        position_focus = st.multiselect(
+            "Integrantes para comparar",
+            options=sorted(view["Integrante"].unique().tolist()),
+            default=default_focus,
+            key="phase4_position_focus",
+        )
+        plotted_positions = position_history[
+            position_history["Integrante"].isin(position_focus)
+        ]
+        if not plotted_positions.empty:
+            fig = px.line(
+                plotted_positions, x="Fecha", y="Posición",
+                color="Integrante", markers=True,
+            )
+            fig.update_yaxes(autorange="reversed", title="Puesto en el club (1 = mejor)")
+            fig.update_layout(
+                template="plotly_dark", height=440,
+                xaxis_title="Fecha", legend_title="Integrante",
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No hay reputaciones históricas numéricas disponibles.")
+            st.info("Selecciona al menos un integrante para ver su evolución de posiciones.")
+
+        st.markdown("#### Clasificación histórica por fecha")
+        selected_snapshot = st.selectbox(
+            "Consultar snapshot",
+            options=position_dates,
+            index=len(position_dates) - 1,
+            key="phase4_snapshot_date",
+        )
+        snapshot_table = (
+            position_history[position_history["Fecha"] == selected_snapshot]
+            .sort_values(["Posición", "Integrante"])
+            .copy()
+        )
+        snapshot_table.insert(
+            0, "Puesto histórico",
+            snapshot_table["Posición"].rank(method="min", ascending=True).astype(int),
+        )
+        snapshot_table = snapshot_table.rename(columns={"Posición": "Puesto en el club"})
+        st.dataframe(
+            snapshot_table[["Puesto histórico", "Integrante", "Puesto en el club"]].round(1),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("#### Resumen de avance por integrante")
+        position_summary = position_summary.sort_values(
+            ["Cambio de posición", "Integrante"], ascending=[False, True]
+        )
+        st.dataframe(
+            position_summary.round(1), use_container_width=True, hide_index=True
+        )
+        st.download_button(
+            "⬇️ Descargar evolución de posiciones CSV",
+            position_summary.round(1).to_csv(index=False).encode("utf-8-sig"),
+            file_name="caramelo_tm_evolucion_posiciones.csv",
+            mime="text/csv",
+        )
     else:
-        st.info("No se identificaron columnas históricas de reputación.")
+        st.info("No hay snapshots numéricos de posición disponibles para los integrantes seleccionados.")
+
+    st.markdown("---")
+    st.markdown("#### Evolución de reputación")
+    if not reputation_history.empty:
+        reputation_focus = st.multiselect(
+            "Integrantes para comparar reputación",
+            options=sorted(view["Integrante"].unique().tolist()),
+            default=[selected_player] if selected_player in view["Integrante"].tolist() else [],
+            key="phase4_reputation_focus",
+        )
+        plotted_reputation = reputation_history[
+            reputation_history["Integrante"].isin(reputation_focus)
+        ]
+        if not plotted_reputation.empty:
+            fig = px.line(
+                plotted_reputation, x="Fecha", y="Reputación",
+                color="Integrante", markers=True,
+            )
+            fig.update_layout(
+                template="plotly_dark", height=410,
+                xaxis_title="Fecha", yaxis_title="Reputación",
+                legend_title="Integrante",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Selecciona al menos un integrante para ver la evolución de reputación.")
+
+        reputation_summary = (
+            reputation_history.sort_values("Fecha")
+            .groupby("Integrante", as_index=False)
+            .agg(
+                **{
+                    "Primera reputación": ("Reputación", "first"),
+                    "Última reputación": ("Reputación", "last"),
+                    "Snapshots": ("Fecha", "nunique"),
+                }
+            )
+        )
+        reputation_summary["Variación de reputación"] = (
+            reputation_summary["Última reputación"] - reputation_summary["Primera reputación"]
+        )
+        st.markdown("#### Variación de reputación")
+        st.dataframe(
+            reputation_summary.sort_values(
+                "Variación de reputación", ascending=False
+            ).round(1),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "⬇️ Descargar evolución de reputación CSV",
+            reputation_summary.round(1).to_csv(index=False).encode("utf-8-sig"),
+            file_name="caramelo_tm_evolucion_reputacion.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No hay snapshots numéricos de reputación disponibles para los integrantes seleccionados.")
+
+    st.info(
+        "Alcance de los datos: estas tendencias comparan los snapshots históricos presentes "
+        "en el archivo Excel. No permiten atribuir cambios a carreras concretas ni calcular "
+        "la evolución histórica de puntos, victorias o podios por periodo. Para eso se necesitaría "
+        "guardar una copia fechada del Excel en cada actualización o disponer de registros por carrera."
+    )
 
 with tab_data:
     st.subheader("Base de datos consultable")
