@@ -907,12 +907,12 @@ with tab_evolution:
             .copy()
         )
         snapshot_table.insert(
-            0, "Puesto histórico",
+            0, "Orden entre seleccionados",
             snapshot_table["Posición"].rank(method="min", ascending=True).astype(int),
         )
         snapshot_table = snapshot_table.rename(columns={"Posición": "Puesto en el club"})
         st.dataframe(
-            snapshot_table[["Puesto histórico", "Integrante", "Puesto en el club"]].round(1),
+            snapshot_table[["Orden entre seleccionados", "Integrante", "Puesto en el club"]].round(1),
             use_container_width=True,
             hide_index=True,
         )
