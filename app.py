@@ -397,6 +397,7 @@ with tab_ranking:
         )
 
         metric_col = ranking_options[selected_metric]
+        position_data = ranking_data.copy()
         ranking_data[metric_col] = pd.to_numeric(ranking_data[metric_col], errors="coerce")
         ranking_data = ranking_data.dropna(subset=[metric_col]).sort_values(
             [metric_col, "Integrante"], ascending=[False, True], kind="stable"
@@ -449,13 +450,10 @@ with tab_ranking:
 
         # Matriz de posiciones para identificar fortalezas por categoría.
         st.markdown("#### Resumen de posiciones por categoría")
-        matrix = pd.DataFrame({"Integrante": view["Integrante"].tolist()})
+        matrix = pd.DataFrame({"Integrante": position_data["Integrante"].tolist()})
+        position_index = position_data.set_index("Integrante")
         for label, col in ranking_options.items():
-            values = pd.to_numeric(ranking_data.set_index("Integrante")[label]
-                                   if label in ranking_data.columns else
-                                   view.set_index("Integrante")[col], errors="coerce")
-            if label not in ranking_data.columns:
-                values = pd.to_numeric(view.set_index("Integrante")[col], errors="coerce")
+            values = pd.to_numeric(position_index[col], errors="coerce")
             positions = values.rank(method="min", ascending=False).astype("Int64")
             matrix[label] = matrix["Integrante"].map(positions)
         matrix = matrix.sort_values("Integrante").reset_index(drop=True)
