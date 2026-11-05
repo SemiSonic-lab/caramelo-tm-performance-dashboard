@@ -218,9 +218,11 @@ with tab_comparator:
         "Integrantes para comparar",
         options=all_players,
         default=all_players[:min(3, len(all_players))],
-        max_selections=5,
         key="comparison_players",
     )
+    if len(comparison_players) > 5:
+        st.warning("Para facilitar la lectura, compara máximo cinco integrantes a la vez.")
+        comparison_players = comparison_players[:5]
 
     if len(comparison_players) < 2:
         st.info("Selecciona al menos dos integrantes para iniciar la comparación.")
