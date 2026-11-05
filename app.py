@@ -163,8 +163,8 @@ k2.metric("IGP promedio", f"{view[igp_col].mean():.2f}" if igp_col else "N/D")
 k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
 
-tab_overview, tab_comparator, tab_ranking, tab_evolution, tab_data = st.tabs(
-    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "📈 Evolución", "📋 Datos"]
+tab_overview, tab_comparator, tab_ranking, tab_awards, tab_evolution, tab_data = st.tabs(
+    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "🎖️ Reconocimientos", "📈 Evolución", "📋 Datos"]
 )
 
 with tab_overview:
@@ -457,6 +457,100 @@ with tab_ranking:
         )
     else:
         st.info("No se encontraron métricas suficientes para construir el ranking.")
+
+with tab_awards:
+    st.subheader("Reconocimientos del equipo")
+    st.caption(
+        "Distinciones calculadas automáticamente con los indicadores disponibles "
+        "en la hoja Caramelo y los filtros seleccionados."
+    )
+
+    award_candidates = []
+
+    def add_award(title, description, metric_label, numerator_col, denominator_col=None, suffix=""):
+        if not numerator_col:
+            return
+        numerator = pd.to_numeric(view[numerator_col], errors="coerce")
+        if denominator_col:
+            denominator = pd.to_numeric(view[denominator_col], errors="coerce").replace(0, float("nan"))
+            values = numerator.div(denominator).mul(100)
+        else:
+            values = numerator
+        valid = values.dropna()
+        if valid.empty:
+            return
+        best_value = valid.max()
+        winners = sorted(view.loc[valid[valid.eq(best_value)].index, "Integrante"].tolist())
+        award_candidates.append({
+            "Reconocimiento": title,
+            "Integrante(s)": ", ".join(winners),
+            "Indicador": metric_label,
+            "Resultado": f"{best_value:,.2f}{suffix}",
+            "Descripción": description,
+        })
+
+    add_award(
+        "Máximo ganador",
+        "Mayor número de carreras ganadas",
+        "Carreras ganadas",
+        wins_col,
+    )
+    add_award(
+        "Mejor promedio de puntos",
+        "Mayor promedio de puntos por carrera",
+        "Promedio de puntos por carrera",
+        avg_points_col,
+    )
+    add_award(
+        "Mayor efectividad de victorias",
+        "Carreras ganadas divididas entre carreras completadas",
+        "Efectividad de victorias",
+        wins_col,
+        races_col,
+        "%",
+    )
+    add_award(
+        "Mayor efectividad de podios",
+        "Podios divididos entre carreras completadas",
+        "Efectividad de podios",
+        podiums_col,
+        races_col,
+        "%",
+    )
+    add_award(
+        "Mayor actividad",
+        "Mayor número de carreras completadas registradas",
+        "Carreras completadas",
+        races_col,
+    )
+
+    if award_candidates:
+        award_cols = st.columns(3)
+        for index, award in enumerate(award_candidates):
+            with award_cols[index % 3]:
+                st.metric(award["Reconocimiento"], award["Integrante(s)"])
+                st.caption(f'{award["Indicador"]}: {award["Resultado"]}')
+        st.markdown("#### Detalle de reconocimientos")
+        awards_table = pd.DataFrame(award_candidates)
+        st.dataframe(
+            awards_table[["Reconocimiento", "Integrante(s)", "Indicador", "Resultado", "Descripción"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "⬇️ Descargar reconocimientos CSV",
+            awards_table.to_csv(index=False).encode("utf-8-sig"),
+            file_name="caramelo_tm_reconocimientos.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No hay indicadores numéricos suficientes para calcular reconocimientos.")
+
+    st.info(
+        "Nota metodológica: «Mayor actividad» reconoce el mayor número de carreras completadas. "
+        "No se presenta como «más constante», porque los datos acumulados no permiten medir "
+        "la regularidad de participación o rendimiento carrera a carrera."
+    )
 
 with tab_evolution:
     st.subheader("Evolución de posición en el club")
