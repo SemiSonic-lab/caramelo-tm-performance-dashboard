@@ -169,8 +169,8 @@ k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
 k5.metric("Participaciones GP", f"{metric_sum(gp_total_col):,.0f}")
 
-tab_overview, tab_ranking, tab_evolution, tab_gp, tab_data = st.tabs(
-    ["📊 Resumen", "🏆 Ranking", "📈 Evolución", "🏁 Grandes Premios", "📋 Datos"]
+tab_overview, tab_comparator, tab_ranking, tab_evolution, tab_gp, tab_data = st.tabs(
+    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "📈 Evolución", "🏁 Grandes Premios", "📋 Datos"]
 )
 
 with tab_overview:
@@ -206,6 +206,141 @@ with tab_overview:
     ] if c and c in view.columns]
     summary = view[display_cols].sort_values(igp_col, ascending=False) if igp_col else view[display_cols]
     st.dataframe(summary, use_container_width=True, hide_index=True)
+
+with tab_comparator:
+    st.subheader("Comparador de integrantes")
+    st.caption(
+        "Selecciona entre dos y cinco integrantes para comparar sus indicadores. "
+        "Las tasas se calculan sobre las carreras completadas."
+    )
+
+    comparison_players = st.multiselect(
+        "Integrantes para comparar",
+        options=all_players,
+        default=all_players[:min(3, len(all_players))],
+        max_selections=5,
+        key="comparison_players",
+    )
+
+    if len(comparison_players) < 2:
+        st.info("Selecciona al menos dos integrantes para iniciar la comparación.")
+    else:
+        comparison = df[df["Integrante"].isin(comparison_players)].copy()
+
+        # Tasas de eficiencia: victorias y podios respecto a carreras completadas.
+        if races_col and wins_col:
+            races = pd.to_numeric(comparison[races_col], errors="coerce").replace(0, float("nan"))
+            comparison["Tasa de victorias (%)"] = (
+                pd.to_numeric(comparison[wins_col], errors="coerce") / races * 100
+            )
+        if races_col and podiums_col:
+            races = pd.to_numeric(comparison[races_col], errors="coerce").replace(0, float("nan"))
+            comparison["Tasa de podios (%)"] = (
+                pd.to_numeric(comparison[podiums_col], errors="coerce") / races * 100
+            )
+
+        comparison_metrics = [
+            ("IGP TOTAL", igp_col),
+            ("Carreras completadas", races_col),
+            ("Puntos de carrera", points_col),
+            ("Promedio de puntos por carrera", avg_points_col),
+            ("Carreras ganadas", wins_col),
+            ("Podios", podiums_col),
+            ("Participaciones GP", gp_total_col),
+        ]
+        available_metrics = [(label, col) for label, col in comparison_metrics if col]
+        efficiency_metrics = [
+            label for label in ["Tasa de victorias (%)", "Tasa de podios (%)"]
+            if label in comparison.columns
+        ]
+
+        # Tabla comparativa con valores absolutos y tasas calculadas.
+        table_cols = ["Integrante"] + [col for _, col in available_metrics] + efficiency_metrics
+        comparison_table = comparison[table_cols].copy()
+        comparison_table = comparison_table.rename(
+            columns={col: label for label, col in available_metrics}
+        )
+        st.markdown("#### Comparación de indicadores")
+        st.dataframe(
+            comparison_table.round(2),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Radar indexado a 100 frente al mejor valor del grupo seleccionado.
+        radar_metrics = [
+            (label, col) for label, col in available_metrics
+            if col in [igp_col, races_col, points_col, avg_points_col, wins_col, podiums_col]
+        ]
+        if len(radar_metrics) >= 3:
+            radar = []
+            for _, player in comparison.iterrows():
+                values = []
+                for _, col in radar_metrics:
+                    group_values = pd.to_numeric(comparison[col], errors="coerce")
+                    maximum = group_values.max()
+                    value = pd.to_numeric(pd.Series([player[col]]), errors="coerce").iloc[0]
+                    values.append(
+                        float(value / maximum * 100)
+                        if pd.notna(value) and pd.notna(maximum) and maximum > 0
+                        else 0
+                    )
+                radar.append((player["Integrante"], values))
+
+            fig = go.Figure()
+            categories = [label for label, _ in radar_metrics]
+            for player_name, values in radar:
+                fig.add_trace(go.Scatterpolar(
+                    r=values + [values[0]],
+                    theta=categories + [categories[0]],
+                    fill="toself",
+                    name=player_name,
+                    opacity=0.65,
+                ))
+            fig.update_layout(
+                template="plotly_dark",
+                title="Perfil comparativo (índice relativo, máximo del grupo = 100)",
+                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                height=520,
+                margin=dict(l=35, r=35, t=65, b=30),
+                legend=dict(orientation="h", y=-0.15),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "El gráfico normaliza cada indicador por separado para facilitar la comparación. "
+                "Consulta la tabla para ver los valores reales."
+            )
+
+        if efficiency_metrics:
+            st.markdown("#### Eficiencia competitiva")
+            efficiency = comparison[["Integrante"] + efficiency_metrics].melt(
+                id_vars="Integrante",
+                var_name="Indicador",
+                value_name="Porcentaje",
+            )
+            fig = px.bar(
+                efficiency,
+                x="Integrante",
+                y="Porcentaje",
+                color="Indicador",
+                barmode="group",
+                text_auto=".1f",
+                color_discrete_sequence=[ORANGE, "#A3A3A3"],
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                height=390,
+                yaxis_title="Porcentaje de carreras",
+                xaxis_title="",
+                margin=dict(l=10, r=10, t=25, b=10),
+                legend_title="",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Tasa de victorias = carreras ganadas / carreras completadas. "
+                "Tasa de podios = podios / carreras completadas. "
+                "Si un integrante no tiene carreras completadas, la tasa queda sin dato."
+            )
 
 with tab_ranking:
     st.subheader("Clasificación por IGP total")
