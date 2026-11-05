@@ -159,7 +159,7 @@ selected_player = st.sidebar.selectbox("Analizar integrante", sorted(selected_pl
 # KPIs generales del conjunto filtrado
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Integrantes", f"{len(view):,}")
-k2.metric("IGP promedio", f"{view[igp_col].mean():.2f}" if igp_col else "N/D")
+k2.metric("IGP promedio", f"{view[igp_col].mean():.1f}" if igp_col else "N/D")
 k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
 
@@ -175,7 +175,7 @@ with tab_overview:
             top = view.nlargest(10, igp_col).sort_values(igp_col, ascending=True)
             fig = px.bar(top, x=igp_col, y="Integrante", orientation="h",
                          text=igp_col, color_discrete_sequence=[ORANGE])
-            fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
             fig.update_layout(template="plotly_dark", height=410, margin=dict(l=10,r=35,t=15,b=10),
                               xaxis_title="IGP total", yaxis_title="", showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
@@ -199,7 +199,7 @@ with tab_overview:
         wins_col, podiums_col
     ] if c and c in view.columns]
     summary = view[display_cols].sort_values(igp_col, ascending=False) if igp_col else view[display_cols]
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.dataframe(summary.round(1), use_container_width=True, hide_index=True)
 
 with tab_comparator:
     st.subheader("Comparador de integrantes")
@@ -257,7 +257,7 @@ with tab_comparator:
         )
         st.markdown("#### Comparación de indicadores")
         st.dataframe(
-            comparison_table.round(2),
+            comparison_table.round(1),
             use_container_width=True,
             hide_index=True,
         )
@@ -403,7 +403,7 @@ with tab_ranking:
         first.metric("Líder actual", ranking_data.iloc[0]["Integrante"] if not ranking_data.empty else "N/D")
         second.metric(
             f"Mejor resultado · {selected_metric}",
-            f"{ranking_data.iloc[0][selected_metric]:,.2f}" if not ranking_data.empty else "N/D",
+            f"{ranking_data.iloc[0][selected_metric]:,.1f}" if not ranking_data.empty else "N/D",
         )
 
         if not ranking_data.empty:
@@ -416,7 +416,7 @@ with tab_ranking:
                 text=selected_metric,
                 color_discrete_sequence=[ORANGE],
             )
-            fig.update_traces(texttemplate="%{text:,.2f}", textposition="outside", cliponaxis=False)
+            fig.update_traces(texttemplate="%{text:,.1f}", textposition="outside", cliponaxis=False)
             fig.update_layout(
                 template="plotly_dark",
                 height=max(360, 38 * len(chart_data) + 100),
@@ -429,13 +429,13 @@ with tab_ranking:
 
             st.markdown("#### Tabla de posiciones")
             st.dataframe(
-                ranking_data.head(top_n).round(2),
+                ranking_data.head(top_n).round(1),
                 use_container_width=True,
                 hide_index=True,
             )
             st.download_button(
                 "⬇️ Descargar ranking CSV",
-                ranking_data.to_csv(index=False).encode("utf-8-sig"),
+                ranking_data.round(1).to_csv(index=False).encode("utf-8-sig"),
                 file_name="caramelo_tm_ranking.csv",
                 mime="text/csv",
             )
@@ -485,7 +485,7 @@ with tab_awards:
             "Reconocimiento": title,
             "Integrante(s)": ", ".join(winners),
             "Indicador": metric_label,
-            "Resultado": f"{best_value:,.2f}{suffix}",
+            "Resultado": f"{best_value:,.1f}{suffix}",
             "Descripción": description,
         })
 
@@ -601,10 +601,10 @@ with tab_evolution:
 with tab_data:
     st.subheader("Base de datos consultable")
     st.caption("Vista de las columnas principales; la hoja Capitanias no forma parte de esta aplicación.")
-    st.dataframe(view[display_cols], use_container_width=True, hide_index=True)
+    st.dataframe(view[display_cols].round(1), use_container_width=True, hide_index=True)
     st.download_button(
         "⬇️ Descargar datos filtrados CSV",
-        view[display_cols].to_csv(index=False).encode("utf-8-sig"),
+        view[display_cols].round(1).to_csv(index=False).encode("utf-8-sig"),
         file_name="caramelo_tm_datos.csv",
         mime="text/csv",
     )
