@@ -858,7 +858,7 @@ with tab_evolution:
 
         st.markdown("#### Balance de posiciones")
         trend_kpis = st.columns(4)
-        trend_kpis[0].metric("Snapshots disponibles", f"{len(position_dates):,.0f}")
+        trend_kpis[0].metric("Fechas históricas", f"{len(position_dates):,.0f}")
         trend_kpis[1].metric("Integrantes que mejoran", f"{improved:,.0f}")
         trend_kpis[2].metric("Integrantes que retroceden", f"{declined:,.0f}")
         trend_kpis[3].metric("Sin cambio neto", f"{unchanged:,.0f}")
