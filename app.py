@@ -163,8 +163,8 @@ k2.metric("IGP promedio", f"{view[igp_col].mean():.1f}" if igp_col else "N/D")
 k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
 
-tab_overview, tab_comparator, tab_ranking, tab_awards, tab_evolution, tab_data = st.tabs(
-    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "🎖️ Reconocimientos", "📈 Evolución", "📋 Datos"]
+tab_overview, tab_comparator, tab_ranking, tab_awards, tab_performance, tab_profile, tab_evolution, tab_data = st.tabs(
+    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "🎖️ Reconocimientos", "🚦 Rendimiento", "👤 Perfil", "📈 Evolución", "📋 Datos"]
 )
 
 with tab_overview:
@@ -551,6 +551,248 @@ with tab_awards:
         "No se presenta como «más constante», porque los datos acumulados no permiten medir "
         "la regularidad de participación o rendimiento carrera a carrera."
     )
+
+with tab_performance:
+    st.subheader("Semáforo de rendimiento")
+    st.caption(
+        "Clasificación relativa entre todos los integrantes registrados. "
+        "El índice prioriza promedio y efectividad; la cantidad de carreras se muestra como contexto."
+    )
+
+    performance = pd.DataFrame({"Integrante": df["Integrante"]})
+    component_scores = {}
+    component_weights = {}
+
+    def relative_percentile(series):
+        """Escala cada métrica de 0 a 100; los empates reciben el promedio de su posición."""
+        numeric = pd.to_numeric(series, errors="coerce")
+        valid = numeric.dropna()
+        result = pd.Series(float("nan"), index=series.index, dtype="float64")
+        count = len(valid)
+        if count == 1:
+            result.loc[valid.index] = 50.0
+        elif count > 1:
+            ranks = valid.rank(method="average", ascending=True)
+            result.loc[valid.index] = (ranks - 1) / (count - 1) * 100
+        return result
+
+    # Pesos del índice: promedio de puntos 40%, efectividad de victorias 30%,
+    # efectividad de podios 30%. Si falta una métrica, los pesos se redistribuyen.
+    if avg_points_col:
+        component_scores["Promedio de puntos"] = relative_percentile(df[avg_points_col])
+        component_weights["Promedio de puntos"] = 0.40
+
+    if races_col and wins_col:
+        completed = pd.to_numeric(df[races_col], errors="coerce").replace(0, float("nan"))
+        win_rate = pd.to_numeric(df[wins_col], errors="coerce").div(completed).mul(100)
+        component_scores["Efectividad de victorias"] = relative_percentile(win_rate)
+        component_weights["Efectividad de victorias"] = 0.30
+
+    if races_col and podiums_col:
+        completed = pd.to_numeric(df[races_col], errors="coerce").replace(0, float("nan"))
+        podium_rate = pd.to_numeric(df[podiums_col], errors="coerce").div(completed).mul(100)
+        component_scores["Efectividad de podios"] = relative_percentile(podium_rate)
+        component_weights["Efectividad de podios"] = 0.30
+
+    if component_scores:
+        score_frame = pd.DataFrame(component_scores, index=df.index)
+        weighted_values = []
+        weighted_validity = []
+        for metric_name, weight in component_weights.items():
+            weighted_values.append(score_frame[metric_name].fillna(0) * weight)
+            weighted_validity.append(score_frame[metric_name].notna().astype(float) * weight)
+        performance["Índice de rendimiento"] = (
+            sum(weighted_values) / sum(weighted_validity).replace(0, float("nan"))
+        )
+        performance["Clasificación"] = performance["Índice de rendimiento"].apply(
+            lambda value: (
+                "🟢 Alto" if pd.notna(value) and value >= 66.7
+                else "🟡 Intermedio" if pd.notna(value) and value >= 33.3
+                else "🔴 En desarrollo" if pd.notna(value)
+                else "Sin datos"
+            )
+        )
+
+        if races_col:
+            performance["Carreras completadas"] = pd.to_numeric(df[races_col], errors="coerce")
+            median_races = performance["Carreras completadas"].median()
+            performance["Referencia de actividad"] = performance["Carreras completadas"].apply(
+                lambda value: (
+                    "Por debajo de la mediana" if pd.notna(value) and pd.notna(median_races) and value < median_races
+                    else "Igual o superior a la mediana" if pd.notna(value) and pd.notna(median_races)
+                    else "Sin dato"
+                )
+            )
+
+        for metric_name in component_scores:
+            performance[metric_name] = score_frame[metric_name]
+
+        performance_view = performance[performance["Integrante"].isin(selected_players)].copy()
+        performance_view = performance_view.sort_values(
+            "Índice de rendimiento", ascending=False, na_position="last"
+        )
+
+        score_col1, score_col2, score_col3 = st.columns(3)
+        valid_scores = performance_view["Índice de rendimiento"].dropna()
+        score_col1.metric("Índice promedio", f"{valid_scores.mean():.1f}" if not valid_scores.empty else "N/D")
+        score_col2.metric("Nivel alto", f"{(performance_view['Clasificación'] == '🟢 Alto').sum():,.0f}")
+        score_col3.metric("Integrantes evaluados", f"{len(valid_scores):,.0f}")
+
+        chart_data = performance_view.dropna(subset=["Índice de rendimiento"]).sort_values(
+            "Índice de rendimiento", ascending=True
+        )
+        if not chart_data.empty:
+            fig = px.bar(
+                chart_data,
+                x="Índice de rendimiento",
+                y="Integrante",
+                color="Clasificación",
+                orientation="h",
+                text="Índice de rendimiento",
+                color_discrete_map={
+                    "🟢 Alto": "#22C55E",
+                    "🟡 Intermedio": "#EAB308",
+                    "🔴 En desarrollo": "#EF4444",
+                    "Sin datos": "#737373",
+                },
+            )
+            fig.update_traces(texttemplate="%{text:.1f}", textposition="outside", cliponaxis=False)
+            fig.update_layout(
+                template="plotly_dark",
+                height=max(360, 38 * len(chart_data) + 100),
+                margin=dict(l=10, r=45, t=20, b=10),
+                xaxis=dict(title="Índice relativo (0–100)", range=[0, 110]),
+                yaxis_title="",
+                legend_title="Clasificación",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        table_columns = ["Integrante", "Índice de rendimiento", "Clasificación"]
+        if "Carreras completadas" in performance_view.columns:
+            table_columns += ["Carreras completadas", "Referencia de actividad"]
+        table_columns += list(component_scores.keys())
+        st.markdown("#### Detalle de evaluación")
+        st.dataframe(
+            performance_view[table_columns].round(1),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.info(
+            "Metodología: el índice combina percentiles internos del equipo: promedio de puntos (40%), "
+            "efectividad de victorias (30%) y efectividad de podios (30%). "
+            "Alto: 66,7–100; intermedio: 33,3–menos de 66,7; en desarrollo: menos de 33,3. "
+            "Los empates comparten puntuación. La actividad no suma puntos al índice; se muestra como contexto. "
+            "La clasificación es relativa al equipo, no una calificación absoluta del juego."
+        )
+    else:
+        st.warning(
+            "No hay métricas suficientes para calcular el semáforo. "
+            "Se requiere al menos el promedio de puntos o indicadores de efectividad."
+        )
+
+with tab_profile:
+    st.subheader("Perfil individual")
+    st.caption("Consulta el desempeño, los indicadores competitivos y el historial disponible de cada integrante.")
+
+    profile_player = st.selectbox(
+        "Seleccionar integrante",
+        options=all_players,
+        index=all_players.index(selected_player) if selected_player in all_players else 0,
+        key="individual_profile_player",
+    )
+    profile_row = df[df["Integrante"] == profile_player].iloc[0]
+
+    def profile_value(column, suffix=""):
+        if not column or column not in profile_row.index:
+            return "N/D"
+        value = pd.to_numeric(pd.Series([profile_row[column]]), errors="coerce").iloc[0]
+        return f"{value:,.1f}{suffix}" if pd.notna(value) else "N/D"
+
+    profile_kpis = st.columns(4)
+    profile_kpis[0].metric("IGP total", profile_value(igp_col))
+    profile_kpis[1].metric("Carreras completadas", profile_value(races_col))
+    profile_kpis[2].metric("Puntos de carrera", profile_value(points_col))
+    profile_kpis[3].metric("Promedio de puntos", profile_value(avg_points_col))
+
+    profile_kpis_2 = st.columns(4)
+    profile_kpis_2[0].metric("Carreras ganadas", profile_value(wins_col))
+    profile_kpis_2[1].metric("Podios", profile_value(podiums_col))
+
+    profile_races = pd.to_numeric(pd.Series([profile_row[races_col]]), errors="coerce").iloc[0] if races_col else float("nan")
+    profile_wins = pd.to_numeric(pd.Series([profile_row[wins_col]]), errors="coerce").iloc[0] if wins_col else float("nan")
+    profile_podiums = pd.to_numeric(pd.Series([profile_row[podiums_col]]), errors="coerce").iloc[0] if podiums_col else float("nan")
+    win_percentage = profile_wins / profile_races * 100 if pd.notna(profile_wins) and pd.notna(profile_races) and profile_races > 0 else float("nan")
+    podium_percentage = profile_podiums / profile_races * 100 if pd.notna(profile_podiums) and pd.notna(profile_races) and profile_races > 0 else float("nan")
+    profile_kpis_2[2].metric("Efectividad de victorias", f"{win_percentage:.1f}%" if pd.notna(win_percentage) else "N/D")
+    profile_kpis_2[3].metric("Efectividad de podios", f"{podium_percentage:.1f}%" if pd.notna(podium_percentage) else "N/D")
+
+    if component_scores and "Índice de rendimiento" in performance.columns:
+        profile_score = performance.loc[performance["Integrante"] == profile_player].iloc[0]
+        st.markdown("#### Evaluación de rendimiento")
+        profile_score_col, profile_level_col = st.columns(2)
+        profile_score_col.metric(
+            "Índice relativo",
+            f"{profile_score['Índice de rendimiento']:.1f}" if pd.notna(profile_score["Índice de rendimiento"]) else "N/D",
+        )
+        profile_level_col.metric("Clasificación", profile_score["Clasificación"])
+
+        profile_components = sorted(
+            [
+                (name, float(profile_score[name]))
+                for name in component_scores
+                if pd.notna(profile_score[name])
+            ],
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        if profile_components:
+            strongest_name, strongest_value = profile_components[0]
+            weakest_name, weakest_value = profile_components[-1]
+            if len(profile_components) == 1 or abs(strongest_value - weakest_value) < 0.1:
+                st.info(f"Los indicadores evaluados muestran un comportamiento equilibrado. Principal referencia: {strongest_name}.")
+            else:
+                insight_left, insight_right = st.columns(2)
+                insight_left.success(f"Fortaleza relativa: **{strongest_name}** ({strongest_value:.1f}/100)")
+                insight_right.warning(f"Oportunidad relativa: **{weakest_name}** ({weakest_value:.1f}/100)")
+            st.caption(
+                "Las fortalezas y oportunidades se identifican comparando percentiles del integrante "
+                "frente al resto del equipo; no representan un diagnóstico absoluto."
+            )
+
+    st.markdown("#### Historial individual")
+    history_found = False
+    if position_cols:
+        position_rows = []
+        for col in position_cols:
+            match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
+            value = pd.to_numeric(pd.Series([profile_row[col]]), errors="coerce").iloc[0]
+            if match and pd.notna(value):
+                position_rows.append({"Fecha": match.group(1), "Posición": value})
+        if position_rows:
+            position_history = pd.DataFrame(position_rows).sort_values("Fecha")
+            fig = px.line(position_history, x="Fecha", y="Posición", markers=True)
+            fig.update_yaxes(autorange="reversed", title="Puesto en el club (1 = mejor)")
+            fig.update_layout(template="plotly_dark", height=320, xaxis_title="Fecha", showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+            history_found = True
+
+    if reputation_cols:
+        reputation_rows = []
+        for col in reputation_cols:
+            match = re.search(r"\((\d{4}-\d{2}-\d{2})\)", col)
+            value = pd.to_numeric(pd.Series([profile_row[col]]), errors="coerce").iloc[0]
+            if match and pd.notna(value):
+                reputation_rows.append({"Fecha": match.group(1), "Reputación": value})
+        if reputation_rows:
+            reputation_history = pd.DataFrame(reputation_rows).sort_values("Fecha")
+            fig = px.line(reputation_history, x="Fecha", y="Reputación", markers=True)
+            fig.update_layout(template="plotly_dark", height=320, xaxis_title="Fecha", showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+            history_found = True
+
+    if not history_found:
+        st.info("Este integrante no tiene datos históricos suficientes para mostrar una evolución.")
 
 with tab_evolution:
     st.subheader("Evolución de posición en el club")
