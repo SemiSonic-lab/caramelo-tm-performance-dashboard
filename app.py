@@ -119,7 +119,6 @@ def metric_mean(col):
 igp_col = find_col("IGP TOTAL")
 races_col = find_col("Carreras Completadas")
 points_col = find_col("Puntos Carrera")
-gp_total_col = find_col("Total Participaciones GP")
 avg_points_col = find_col("Promedio Puntos por Carrera")
 wins_col = find_col("Carreras Ganadas")
 podiums_col = find_col("Podios")
@@ -131,10 +130,6 @@ position_cols = sorted(position_cols, key=lambda c: re.search(r"\((\d{4}-\d{2}-\
                        if re.search(r"\((\d{4}-\d{2}-\d{2})\)", c) else "")
 reputation_cols = sorted(reputation_cols, key=lambda c: re.search(r"\((\d{4}-\d{2}-\d{2})\)", c).group(1)
                          if re.search(r"\((\d{4}-\d{2}-\d{2})\)", c) else "")
-
-gp_start = df.columns.get_loc("Nuevos Comienzos") if "Nuevos Comienzos" in df.columns else None
-gp_end = df.columns.get_loc("Total Participaciones GP") if "Total Participaciones GP" in df.columns else None
-gp_cols = list(df.columns[gp_start:gp_end]) if gp_start is not None and gp_end is not None else []
 
 st.markdown(
     """
@@ -162,15 +157,14 @@ view = df[df["Integrante"].isin(selected_players)].copy()
 selected_player = st.sidebar.selectbox("Analizar integrante", sorted(selected_players))
 
 # KPIs generales del conjunto filtrado
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4 = st.columns(4)
 k1.metric("Integrantes", f"{len(view):,}")
 k2.metric("IGP promedio", f"{view[igp_col].mean():.2f}" if igp_col else "N/D")
 k3.metric("Carreras completadas", f"{metric_sum(races_col):,.0f}")
 k4.metric("Puntos de carrera", f"{metric_sum(points_col):,.0f}")
-k5.metric("Participaciones GP", f"{metric_sum(gp_total_col):,.0f}")
 
-tab_overview, tab_comparator, tab_ranking, tab_evolution, tab_gp, tab_data = st.tabs(
-    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "📈 Evolución", "🏁 Grandes Premios", "📋 Datos"]
+tab_overview, tab_comparator, tab_ranking, tab_evolution, tab_data = st.tabs(
+    ["📊 Resumen", "⚖️ Comparador", "🏆 Ranking", "📈 Evolución", "📋 Datos"]
 )
 
 with tab_overview:
@@ -202,7 +196,7 @@ with tab_overview:
     st.subheader("Indicadores individuales")
     display_cols = [c for c in [
         "Integrante", igp_col, races_col, points_col, avg_points_col,
-        wins_col, podiums_col, gp_total_col
+        wins_col, podiums_col
     ] if c and c in view.columns]
     summary = view[display_cols].sort_values(igp_col, ascending=False) if igp_col else view[display_cols]
     st.dataframe(summary, use_container_width=True, hide_index=True)
@@ -248,7 +242,6 @@ with tab_comparator:
             ("Promedio de puntos por carrera", avg_points_col),
             ("Carreras ganadas", wins_col),
             ("Podios", podiums_col),
-            ("Participaciones GP", gp_total_col),
         ]
         available_metrics = [(label, col) for label, col in comparison_metrics if col]
         efficiency_metrics = [
@@ -361,7 +354,6 @@ with tab_ranking:
         ("Carreras completadas", races_col),
         ("Carreras ganadas", wins_col),
         ("Podios", podiums_col),
-        ("Participaciones en GP", gp_total_col),
         ("Promedio de puntos por carrera", avg_points_col),
     ]:
         if col and col in ranking_data.columns:
@@ -511,22 +503,6 @@ with tab_evolution:
             st.info("No hay reputaciones históricas numéricas disponibles.")
     else:
         st.info("No se identificaron columnas históricas de reputación.")
-
-with tab_gp:
-    st.subheader("Resultados por Gran Premio")
-    st.caption("Se conservan los códigos especiales (por ejemplo, F y Q) tal como aparecen en el Excel.")
-    if gp_cols:
-        player_row = df[df["Integrante"].eq(selected_player)].iloc[0]
-        gp_table = pd.DataFrame({
-            "Gran Premio": gp_cols,
-            "Resultado": [player_row[c] if pd.notna(player_row[c]) else "—" for c in gp_cols],
-        })
-        st.markdown(f"**Integrante seleccionado:** {selected_player}")
-        st.dataframe(gp_table, use_container_width=True, hide_index=True)
-        if gp_total_col:
-            st.metric("Total participaciones GP registradas", f"{player_row[gp_total_col]:,.0f}")
-    else:
-        st.info("No se identificaron columnas de Grandes Premios.")
 
 with tab_data:
     st.subheader("Base de datos consultable")
