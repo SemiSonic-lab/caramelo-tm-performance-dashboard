@@ -71,10 +71,15 @@ def main():
     if not rows:
         raise ValueError("No hay valores numéricos para registrar en el histórico.")
 
+    capture_date = datetime.now(timezone.utc).date().isoformat()
     canonical = json.dumps(
         normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
-    snapshot_id = sha256(canonical.encode("utf-8")).hexdigest()
+    # La misma captura se evita dentro del día, pero permite registrar
+    # que los indicadores permanecen estables en días posteriores.
+    snapshot_id = sha256(
+        f"{capture_date}|{canonical}".encode("utf-8")
+    ).hexdigest()
 
     if HISTORY_FILE.exists():
         existing = pd.read_csv(HISTORY_FILE)
