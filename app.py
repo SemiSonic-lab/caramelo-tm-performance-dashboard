@@ -345,18 +345,128 @@ with tab_comparator:
             )
 
 with tab_ranking:
-    st.subheader("Clasificación por IGP total")
-    if igp_col:
-        ranking = view[["Integrante", igp_col]].sort_values(igp_col, ascending=False).reset_index(drop=True)
-        ranking.insert(0, "Posición", ranking.index + 1)
-        st.dataframe(ranking, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Descargar ranking CSV",
-            ranking.to_csv(index=False).encode("utf-8-sig"),
-            file_name="caramelo_tm_ranking.csv",
-            mime="text/csv",
+    st.subheader("Ranking avanzado de integrantes")
+    st.caption(
+        "Consulta la clasificación por diferentes indicadores. Los filtros generales "
+        "del panel lateral se aplican también a este ranking."
+    )
+
+    ranking_data = view.copy()
+    ranking_options = {}
+
+    # Indicadores absolutos disponibles en la hoja Caramelo.
+    for label, col in [
+        ("IGP total", igp_col),
+        ("Puntos de carrera", points_col),
+        ("Carreras completadas", races_col),
+        ("Carreras ganadas", wins_col),
+        ("Podios", podiums_col),
+        ("Participaciones en GP", gp_total_col),
+        ("Promedio de puntos por carrera", avg_points_col),
+    ]:
+        if col and col in ranking_data.columns:
+            ranking_options[label] = col
+
+    # Indicadores de eficiencia calculados con los datos originales.
+    if races_col and wins_col:
+        completed = pd.to_numeric(ranking_data[races_col], errors="coerce").replace(0, float("nan"))
+        wins = pd.to_numeric(ranking_data[wins_col], errors="coerce")
+        ranking_data["Efectividad de victorias (%)"] = wins.div(completed).mul(100)
+        ranking_options["Efectividad de victorias (%)"] = "Efectividad de victorias (%)"
+
+    if races_col and podiums_col:
+        completed = pd.to_numeric(ranking_data[races_col], errors="coerce").replace(0, float("nan"))
+        podiums = pd.to_numeric(ranking_data[podiums_col], errors="coerce")
+        ranking_data["Efectividad de podios (%)"] = podiums.div(completed).mul(100)
+        ranking_options["Efectividad de podios (%)"] = "Efectividad de podios (%)"
+
+    if ranking_options:
+        preferred_metric = "IGP total" if "IGP total" in ranking_options else next(iter(ranking_options))
+        selected_metric = st.selectbox(
+            "Clasificar integrantes por",
+            options=list(ranking_options.keys()),
+            index=list(ranking_options.keys()).index(preferred_metric),
+            key="advanced_ranking_metric",
         )
-    st.caption("El ranking se calcula ordenando de mayor a menor el campo IGP TOTAL del Excel.")
+        top_n = st.slider(
+            "Integrantes que se muestran",
+            min_value=5,
+            max_value=max(5, min(30, len(ranking_data))),
+            value=min(10, max(5, len(ranking_data))),
+            key="advanced_ranking_top_n",
+        )
+
+        metric_col = ranking_options[selected_metric]
+        ranking_data[metric_col] = pd.to_numeric(ranking_data[metric_col], errors="coerce")
+        ranking_data = ranking_data.dropna(subset=[metric_col]).sort_values(
+            [metric_col, "Integrante"], ascending=[False, True], kind="stable"
+        ).reset_index(drop=True)
+        ranking_data.insert(0, "Posición", ranking_data[metric_col].rank(
+            method="min", ascending=False
+        ).astype(int))
+        ranking_data = ranking_data.rename(columns={metric_col: selected_metric})
+
+        first, second = st.columns(2)
+        first.metric("Líder actual", ranking_data.iloc[0]["Integrante"] if not ranking_data.empty else "N/D")
+        second.metric(
+            f"Mejor resultado · {selected_metric}",
+            f"{ranking_data.iloc[0][selected_metric]:,.2f}" if not ranking_data.empty else "N/D",
+        )
+
+        if not ranking_data.empty:
+            chart_data = ranking_data.head(top_n).sort_values(selected_metric, ascending=True)
+            fig = px.bar(
+                chart_data,
+                x=selected_metric,
+                y="Integrante",
+                orientation="h",
+                text=selected_metric,
+                color_discrete_sequence=[ORANGE],
+            )
+            fig.update_traces(texttemplate="%{text:,.2f}", textposition="outside", cliponaxis=False)
+            fig.update_layout(
+                template="plotly_dark",
+                height=max(360, 38 * len(chart_data) + 100),
+                margin=dict(l=10, r=45, t=20, b=10),
+                xaxis_title=selected_metric,
+                yaxis_title="",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("#### Tabla de posiciones")
+            st.dataframe(
+                ranking_data.head(top_n).round(2),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "⬇️ Descargar ranking CSV",
+                ranking_data.to_csv(index=False).encode("utf-8-sig"),
+                file_name="caramelo_tm_ranking.csv",
+                mime="text/csv",
+            )
+
+        # Matriz de posiciones para identificar fortalezas por categoría.
+        st.markdown("#### Resumen de posiciones por categoría")
+        matrix = pd.DataFrame({"Integrante": view["Integrante"].tolist()})
+        for label, col in ranking_options.items():
+            values = pd.to_numeric(ranking_data.set_index("Integrante")[label]
+                                   if label in ranking_data.columns else
+                                   view.set_index("Integrante")[col], errors="coerce")
+            if label not in ranking_data.columns:
+                values = pd.to_numeric(view.set_index("Integrante")[col], errors="coerce")
+            positions = values.rank(method="min", ascending=False).astype("Int64")
+            matrix[label] = matrix["Integrante"].map(positions)
+        matrix = matrix.sort_values("Integrante").reset_index(drop=True)
+        st.dataframe(matrix, use_container_width=True, hide_index=True)
+        st.caption(
+            "La posición 1 representa el mejor resultado. Los empates comparten posición; "
+            "los indicadores porcentuales se calculan sobre carreras completadas. "
+            "Los integrantes sin dato válido no reciben posición en esa categoría."
+        )
+    else:
+        st.info("No se encontraron métricas suficientes para construir el ranking.")
 
 with tab_evolution:
     st.subheader("Evolución de posición en el club")
