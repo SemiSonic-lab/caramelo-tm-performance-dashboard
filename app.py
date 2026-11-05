@@ -76,31 +76,45 @@ def load_data():
 
     data = raw.dropna(subset=["Integrante"]).copy()
     data["Integrante"] = data["Integrante"].astype(str).str.strip()
-    data = data[data["Integrante"].ne("") & data["Integrante"].ne("nan")]
+    data = data[data["Integrante"].ne("") & data["Integrante"].str.casefold().ne("nan")]
     data = data.drop_duplicates(subset=["Integrante"], keep="last")
 
-    # Columnas numéricas: se convierten sin alterar los códigos F y Q de los GP.
+    # Las columnas entre "Nuevos Comienzos" y "Total Participaciones GP"
+    # contienen resultados GP (incluidos códigos como F y Q) y deben conservarse.
+    gp_start = raw.columns.get_loc("Nuevos Comienzos") if "Nuevos Comienzos" in raw.columns else None
+    gp_end = raw.columns.get_loc("Total Participaciones GP") if "Total Participaciones GP" in raw.columns else None
+    gp_result_cols = (
+        set(raw.columns[gp_start:gp_end])
+        if gp_start is not None and gp_end is not None and gp_start < gp_end
+        else set()
+    )
+
+    # Convertir todas las métricas a número, sin alterar los códigos de resultados GP.
+    # La conversión explícita evita que IGP TOTAL y los totales GP queden como texto
+    # por contener las letras "GP" en el nombre de la columna.
     for col in data.columns:
-        if col == "Integrante":
+        if col == "Integrante" or col in gp_result_cols:
             continue
-        if not any(token in col for token in ["GP", "Comienzos", "Generaciones", "Cadillac",
-                                               "Duelistas", "Lauda", "Picks", "Heroes",
-                                               "Titanes", "Pesadilla"]):
-            data[col] = pd.to_numeric(data[col], errors="coerce")
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
     return data
 
 
 df = load_data()
 
+
 def find_col(prefix):
     matches = [c for c in df.columns if c.lower().startswith(prefix.lower())]
     return matches[0] if matches else None
 
+
 def metric_sum(col):
     return pd.to_numeric(df[col], errors="coerce").sum() if col else 0
 
+
 def metric_mean(col):
     return pd.to_numeric(df[col], errors="coerce").mean() if col else float("nan")
+
 
 igp_col = find_col("IGP TOTAL")
 races_col = find_col("Carreras Completadas")
